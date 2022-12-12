@@ -18,7 +18,7 @@ import (
 )
 
 var (
-	masterKey = flag.String("master-key", "none", "none, random, password")
+	masterKey = flag.String("master-key", "none", "none, random, prompt")
 	binaryEnc = flag.Bool("binary", false, "Encode the key as bytes rather than JSON")
 )
 
@@ -55,7 +55,7 @@ func realMain() error {
 	// We're going to encrypt this with the generated key
 	// and decrypt it with the decoded key, just to make
 	// sure that we're handling the keys properly.
-	data := "there is no place like home"
+	data := "there is no place like 127.0.0.1"
 
 	var cipherText bytes.Buffer
 	err = encrypt(sk1, bytes.NewReader([]byte(data)), &cipherText)
@@ -75,21 +75,21 @@ func realMain() error {
 	return nil
 }
 
+// NOTE: there is a tink.AEAD implementation
+// that uses HashiCorp's vault transit engine,
+// but we're not going to play with vault here.
 func newMasterKey() (tink.AEAD, error) {
-	// NOTE: there is a tink.AEAD implementation
-	// that uses HashiCorp's vault transit engine,
-	// but we're not going to play with vault here.
+	var buf []byte
 	switch *masterKey {
+	case "":
+		return nil, fmt.Errorf("blank master key")
 	case "none":
+		log.Println("Not using a master key")
 		return noopAEAD{}, nil
 	case "random":
 		log.Println("Using random master key")
-		key, err := subtle.NewAESGCMSIV(random.GetRandomBytes(32))
-		if err != nil {
-			return nil, fmt.Errorf("newMasterKey.random: %w", err)
-		}
-		return key, nil
-	default:
+		buf = random.GetRandomBytes(32)
+	case "prompt":
 		var password string
 		// survey has a password prompt, but it's not necessary here
 		prompt := &survey.Input{Message: "Enter password"}
@@ -99,14 +99,20 @@ func newMasterKey() (tink.AEAD, error) {
 		if password == "" {
 			return nil, fmt.Errorf("blank password")
 		}
-		// ensure we get a proper 256-bit AES key
-		buf := sha256.Sum256([]byte(password))
-		key, err := subtle.NewAESGCMSIV(buf[:])
-		if err != nil {
-			return nil, fmt.Errorf("newMasterKey.password: %w", err)
-		}
-		return key, nil
+		buf = []byte(password)
+	default:
+		log.Println("Using given master key")
+		buf = []byte(*masterKey)
 	}
+	if len(buf) != 32 {
+		sum := sha256.Sum256(buf)
+		buf = sum[:]
+	}
+	key, err := subtle.NewAESGCMSIV(buf)
+	if err != nil {
+		return nil, fmt.Errorf("newMasterKey: %w", err)
+	}
+	return key, nil
 }
 
 func newStreamingKey() (*keyset.Handle, error) {
