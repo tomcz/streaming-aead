@@ -116,6 +116,8 @@ func newMasterKey() (tink.AEAD, error) {
 }
 
 func newStreamingKey() (*keyset.Handle, error) {
+	// AES128_GCM_HKDF_1MB key type is recommended by tink docs for file use-cases.
+	// Ref: https://developers.google.com/tink/encrypt-large-files-or-data-streams
 	key, err := keyset.NewHandle(streamingaead.AES128GCMHKDF1MBKeyTemplate())
 	if err != nil {
 		return nil, fmt.Errorf("newStreamingKey: %w", err)
