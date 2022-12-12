@@ -13,11 +13,10 @@ import (
 	"github.com/google/tink/go/keyset"
 	"github.com/google/tink/go/streamingaead"
 	"github.com/google/tink/go/subtle/random"
-	"github.com/google/tink/go/testutil"
 	"github.com/google/tink/go/tink"
 )
 
-var masterKey = flag.String("master-key", "dummy", "dummy, random, password")
+var masterKey = flag.String("master-key", "none", "none, random, password")
 
 func main() {
 	flag.Parse()
@@ -27,11 +26,14 @@ func main() {
 }
 
 func realMain() error {
-	mk, err := newMasterKey()
+	sk1, err := newStreamingKey()
 	if err != nil {
 		return err
 	}
-	sk1, err := newStreamingKey()
+
+	// NOTE: There's no need to encode/decode the key before use.
+	// Doing this here to document how to do that for future me.
+	mk, err := newMasterKey()
 	if err != nil {
 		return err
 	}
@@ -39,12 +41,16 @@ func realMain() error {
 	if err != nil {
 		return err
 	}
-	log.Println("Key:", encoded)
 	sk2, err := decodeStreamingKey(encoded, mk)
 	if err != nil {
 		return err
 	}
+	// So, what does an encoded key look like?
+	log.Println("Key:", encoded)
 
+	// We're going to encrypt this with the generated key
+	// and decrypt it with the decoded key, just to make
+	// sure that we're handling the keys properly.
 	data := "there is no place like home"
 
 	var cipherText bytes.Buffer
@@ -59,6 +65,7 @@ func realMain() error {
 		return err
 	}
 
+	// Well, did it work or not?
 	log.Printf("Expected: %q\n", data)
 	log.Printf("Actual:   %q\n", plainText.String())
 	return nil
@@ -66,18 +73,18 @@ func realMain() error {
 
 func newMasterKey() (tink.AEAD, error) {
 	switch *masterKey {
-	case "dummy":
-		log.Println("Using dummy master key")
-		return &testutil.DummyAEAD{Name: "dummy"}, nil
+	case "none":
+		return noopAEAD{}, nil
 	case "random":
 		log.Println("Using random master key")
 		key, err := subtle.NewAESGCMSIV(random.GetRandomBytes(32))
 		if err != nil {
-			return nil, fmt.Errorf("newMasterKey: %w", err)
+			return nil, fmt.Errorf("newMasterKey.random: %w", err)
 		}
 		return key, nil
 	default:
 		var password string
+		// survey has a password prompt, but it's not necessary here
 		prompt := &survey.Input{Message: "Enter password"}
 		if err := survey.AskOne(prompt, &password); err != nil {
 			return nil, fmt.Errorf("newMasterKey.prompt: %w", err)
@@ -85,10 +92,11 @@ func newMasterKey() (tink.AEAD, error) {
 		if password == "" {
 			return nil, fmt.Errorf("blank password")
 		}
+		// ensure we get a proper 256-bit AES key
 		buf := sha256.Sum256([]byte(password))
 		key, err := subtle.NewAESGCMSIV(buf[:])
 		if err != nil {
-			return nil, fmt.Errorf("newMasterKey: %w", err)
+			return nil, fmt.Errorf("newMasterKey.password: %w", err)
 		}
 		return key, nil
 	}
@@ -153,4 +161,14 @@ func decrypt(key *keyset.Handle, cipherText io.Reader, plainText io.Writer) erro
 		log.Fatalln("decrypt.Copy", err)
 	}
 	return nil
+}
+
+type noopAEAD struct{}
+
+func (n noopAEAD) Encrypt(plaintext, _ []byte) ([]byte, error) {
+	return plaintext, nil
+}
+
+func (n noopAEAD) Decrypt(ciphertext, _ []byte) ([]byte, error) {
+	return ciphertext, nil
 }
