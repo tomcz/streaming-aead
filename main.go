@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/base64"
 	"flag"
 	"fmt"
 	"io"
@@ -16,7 +17,10 @@ import (
 	"github.com/google/tink/go/tink"
 )
 
-var masterKey = flag.String("master-key", "none", "none, random, password")
+var (
+	masterKey = flag.String("master-key", "none", "none, random, password")
+	binaryEnc = flag.Bool("binary", false, "Encode the key as bytes rather than JSON")
+)
 
 func main() {
 	flag.Parse()
@@ -72,6 +76,9 @@ func realMain() error {
 }
 
 func newMasterKey() (tink.AEAD, error) {
+	// NOTE: there is a tink.AEAD implementation
+	// that uses HashiCorp's vault transit engine,
+	// but we're not going to play with vault here.
 	switch *masterKey {
 	case "none":
 		return noopAEAD{}, nil
@@ -112,18 +119,35 @@ func newStreamingKey() (*keyset.Handle, error) {
 
 func encodeStreamingKey(key *keyset.Handle, masterKey tink.AEAD) (string, error) {
 	var buf bytes.Buffer
-	w := keyset.NewJSONWriter(&buf)
+	var w keyset.Writer
+	if *binaryEnc {
+		w = keyset.NewBinaryWriter(&buf)
+	} else {
+		w = keyset.NewJSONWriter(&buf)
+	}
 	if err := key.Write(w, masterKey); err != nil {
 		return "", fmt.Errorf("encodeStreamingKey: %w", err)
+	}
+	if *binaryEnc {
+		return base64.StdEncoding.EncodeToString(buf.Bytes()), nil
 	}
 	return buf.String(), nil
 }
 
 func decodeStreamingKey(encoded string, masterKey tink.AEAD) (*keyset.Handle, error) {
-	r := keyset.NewJSONReader(bytes.NewReader([]byte(encoded)))
+	var r keyset.Reader
+	if *binaryEnc {
+		buf, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil {
+			return nil, fmt.Errorf("decodeStreamingKey.Decode: %w", err)
+		}
+		r = keyset.NewBinaryReader(bytes.NewReader(buf))
+	} else {
+		r = keyset.NewJSONReader(bytes.NewReader([]byte(encoded)))
+	}
 	key, err := keyset.Read(r, masterKey)
 	if err != nil {
-		return nil, fmt.Errorf("decodeStreamingKey: %w", err)
+		return nil, fmt.Errorf("decodeStreamingKey.Read: %w", err)
 	}
 	return key, nil
 }
