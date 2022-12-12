@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 
+	"github.com/AlecAivazis/survey/v2"
 	"github.com/google/tink/go/aead/subtle"
 	"github.com/google/tink/go/keyset"
 	"github.com/google/tink/go/streamingaead"
@@ -76,8 +77,15 @@ func newMasterKey() (tink.AEAD, error) {
 		}
 		return key, nil
 	default:
-		log.Println("Using given password as master key")
-		buf := sha256.Sum256([]byte(*masterKey))
+		var password string
+		prompt := &survey.Input{Message: "Enter password"}
+		if err := survey.AskOne(prompt, &password); err != nil {
+			return nil, fmt.Errorf("newMasterKey.prompt: %w", err)
+		}
+		if password == "" {
+			return nil, fmt.Errorf("blank password")
+		}
+		buf := sha256.Sum256([]byte(password))
 		key, err := subtle.NewAESGCMSIV(buf[:])
 		if err != nil {
 			return nil, fmt.Errorf("newMasterKey: %w", err)
