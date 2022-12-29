@@ -25,7 +25,7 @@ var (
 func main() {
 	flag.Parse()
 	if err := realMain(); err != nil {
-		log.Fatalln(err)
+		log.Fatalf("%+v\n", err)
 	}
 }
 
