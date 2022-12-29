@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"flag"
-	"fmt"
 	"io"
 	"log"
 
@@ -15,6 +14,7 @@ import (
 	"github.com/google/tink/go/streamingaead"
 	"github.com/google/tink/go/subtle/random"
 	"github.com/google/tink/go/tink"
+	"github.com/pkg/errors"
 )
 
 var (
@@ -82,7 +82,7 @@ func newMasterKey() (tink.AEAD, error) {
 	var buf []byte
 	switch *masterKey {
 	case "":
-		return nil, fmt.Errorf("blank master key")
+		return nil, errors.New("blank master key")
 	case "none":
 		log.Println("Not using a master key")
 		return noopAEAD{}, nil
@@ -94,10 +94,10 @@ func newMasterKey() (tink.AEAD, error) {
 		// survey has a password prompt, but it's not necessary here
 		prompt := &survey.Input{Message: "Enter password"}
 		if err := survey.AskOne(prompt, &password); err != nil {
-			return nil, fmt.Errorf("newMasterKey.prompt: %w", err)
+			return nil, errors.Wrap(err, "newMasterKey.prompt")
 		}
 		if password == "" {
-			return nil, fmt.Errorf("blank password")
+			return nil, errors.New("blank password")
 		}
 		buf = []byte(password)
 	default:
@@ -110,7 +110,7 @@ func newMasterKey() (tink.AEAD, error) {
 	}
 	key, err := subtle.NewAESGCMSIV(buf)
 	if err != nil {
-		return nil, fmt.Errorf("newMasterKey: %w", err)
+		return nil, errors.Wrap(err, "newMasterKey")
 	}
 	return key, nil
 }
@@ -120,7 +120,7 @@ func newStreamingKey() (*keyset.Handle, error) {
 	// Ref: https://developers.google.com/tink/encrypt-large-files-or-data-streams
 	key, err := keyset.NewHandle(streamingaead.AES128GCMHKDF1MBKeyTemplate())
 	if err != nil {
-		return nil, fmt.Errorf("newStreamingKey: %w", err)
+		return nil, errors.Wrap(err, "newStreamingKey")
 	}
 	return key, nil
 }
@@ -134,7 +134,7 @@ func encodeStreamingKey(key *keyset.Handle, masterKey tink.AEAD) (string, error)
 		w = keyset.NewJSONWriter(&buf)
 	}
 	if err := key.Write(w, masterKey); err != nil {
-		return "", fmt.Errorf("encodeStreamingKey: %w", err)
+		return "", errors.Wrap(err, "encodeStreamingKey")
 	}
 	if *binaryEnc {
 		return base64.StdEncoding.EncodeToString(buf.Bytes()), nil
@@ -147,7 +147,7 @@ func decodeStreamingKey(encoded string, masterKey tink.AEAD) (*keyset.Handle, er
 	if *binaryEnc {
 		buf, err := base64.StdEncoding.DecodeString(encoded)
 		if err != nil {
-			return nil, fmt.Errorf("decodeStreamingKey.Decode: %w", err)
+			return nil, errors.Wrap(err, "decodeStreamingKey.Decode")
 		}
 		r = keyset.NewBinaryReader(bytes.NewReader(buf))
 	} else {
@@ -155,7 +155,7 @@ func decodeStreamingKey(encoded string, masterKey tink.AEAD) (*keyset.Handle, er
 	}
 	key, err := keyset.Read(r, masterKey)
 	if err != nil {
-		return nil, fmt.Errorf("decodeStreamingKey.Read: %w", err)
+		return nil, errors.Wrap(err, "decodeStreamingKey.Read")
 	}
 	return key, nil
 }
@@ -163,18 +163,19 @@ func decodeStreamingKey(encoded string, masterKey tink.AEAD) (*keyset.Handle, er
 func encrypt(key *keyset.Handle, plainText io.Reader, cipherText io.Writer) error {
 	encCipher, err := streamingaead.New(key)
 	if err != nil {
-		return fmt.Errorf("encrypt.NewStreamingAEAD: %w", err)
+		return errors.Wrap(err, "encrypt.NewStreamingAEAD")
 	}
 	writer, err := encCipher.NewEncryptingWriter(cipherText, nil)
 	if err != nil {
-		return fmt.Errorf("encrypt.NewEncryptingWriter: %w", err)
+		return errors.Wrap(err, "encrypt.NewEncryptingWriter")
 	}
 	_, err = io.Copy(writer, plainText)
 	if err != nil {
-		return fmt.Errorf("encrypt.Copy: %w", err)
+		return errors.Wrap(err, "encrypt.Copy")
 	}
-	if err = writer.Close(); err != nil {
-		return fmt.Errorf("encrypt.Close: %w", err)
+	err = writer.Close()
+	if err != nil {
+		return errors.Wrap(err, "encrypt.Close")
 	}
 	return nil
 }
@@ -182,15 +183,15 @@ func encrypt(key *keyset.Handle, plainText io.Reader, cipherText io.Writer) erro
 func decrypt(key *keyset.Handle, cipherText io.Reader, plainText io.Writer) error {
 	decCipher, err := streamingaead.New(key)
 	if err != nil {
-		return fmt.Errorf("decrypt.NewStreamingAEAD: %w", err)
+		return errors.Wrap(err, "decrypt.NewStreamingAEAD")
 	}
 	reader, err := decCipher.NewDecryptingReader(cipherText, nil)
 	if err != nil {
-		return fmt.Errorf("decrypt.NewDecryptingReader: %w", err)
+		return errors.Wrap(err, "decrypt.NewDecryptingReader")
 	}
 	_, err = io.Copy(plainText, reader)
 	if err != nil {
-		log.Fatalln("decrypt.Copy", err)
+		return errors.Wrap(err, "decrypt.Copy")
 	}
 	return nil
 }
