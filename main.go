@@ -161,11 +161,11 @@ func decodeStreamingKey(encoded string, masterKey tink.AEAD) (*keyset.Handle, er
 }
 
 func encrypt(key *keyset.Handle, plainText io.Reader, cipherText io.Writer) error {
-	encCipher, err := streamingaead.New(key)
+	cipher, err := streamingaead.New(key)
 	if err != nil {
 		return errors.Wrap(err, "encrypt.NewStreamingAEAD")
 	}
-	writer, err := encCipher.NewEncryptingWriter(cipherText, nil)
+	writer, err := cipher.NewEncryptingWriter(cipherText, nil)
 	if err != nil {
 		return errors.Wrap(err, "encrypt.NewEncryptingWriter")
 	}
@@ -181,11 +181,11 @@ func encrypt(key *keyset.Handle, plainText io.Reader, cipherText io.Writer) erro
 }
 
 func decrypt(key *keyset.Handle, cipherText io.Reader, plainText io.Writer) error {
-	decCipher, err := streamingaead.New(key)
+	cipher, err := streamingaead.New(key)
 	if err != nil {
 		return errors.Wrap(err, "decrypt.NewStreamingAEAD")
 	}
-	reader, err := decCipher.NewDecryptingReader(cipherText, nil)
+	reader, err := cipher.NewDecryptingReader(cipherText, nil)
 	if err != nil {
 		return errors.Wrap(err, "decrypt.NewDecryptingReader")
 	}
